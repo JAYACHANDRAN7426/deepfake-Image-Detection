@@ -1,9 +1,10 @@
-streamlit==1.51.0
 tensorflow==2.20.0
+keras-core
+keras-cv
+numpy
+streamlit
+pillow
+matplotlib
 torch
 torchvision
-numpy
-pillow
 opencv-python-headless
-matplotlib
-
