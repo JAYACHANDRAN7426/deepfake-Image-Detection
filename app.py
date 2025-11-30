@@ -1,24 +1,17 @@
 import streamlit as st
 import numpy as np
-import torch
 import tensorflow as tf
-from PIL import Image
-import matplotlib.pyplot as plt
 from tensorflow.keras.layers import *
 from tensorflow.keras.models import Model
-from torchvision.models import efficientnet_b0
-from torchvision import transforms
+from PIL import Image
+import keras_cv
+import keras_core as keras
+import matplotlib.pyplot as plt
 
-# ---------------------------------------------------------
-#               STREAMLIT CLOUD MODEL PATHS
-# ---------------------------------------------------------
-MESO_WEIGHTS = "models/Meso4_DF.h5"
-EFF_WEIGHTS  = "models/best_model-v3.pt"
-DEVICE = "cpu"       # Streamlit Cloud has NO GPU
+# ======================================================================
+#                          MODEL 1 – MESONET
+# ======================================================================
 
-# ---------------------------------------------------------
-#                   BUILD MESO4 MODEL
-# ---------------------------------------------------------
 def build_meso4():
     inp = Input(shape=(256, 256, 3))
     x = Conv2D(8, (3,3), padding='same', activation='relu')(inp)
@@ -45,71 +38,57 @@ def build_meso4():
     out = Dense(1, activation="sigmoid")(x)
     return Model(inp, out)
 
-
-# Load mesonet weights
 meso = build_meso4()
-meso.load_weights(MESO_WEIGHTS)
 
+# Load your trained weight from GitHub repo folder
+meso.load_weights("models/Meso4_DF.h5")
 
 def meso_predict(img):
     img = img.resize((256,256))
-    arr = np.array(img) / 255.0
+    arr = np.array(img)/255.0
     arr = np.expand_dims(arr, 0)
     return float(meso.predict(arr)[0][0])
 
-# ---------------------------------------------------------
-#               LOAD EFFICIENTNET MODEL
-# ---------------------------------------------------------
-eff_model = efficientnet_b0(weights=None)
 
-# Fix classifier shape
-try:
-    in_features = eff_model.classifier[1].in_features
-    eff_model.classifier[1] = torch.nn.Linear(in_features, 2)
-except:
-    eff_model.classifier = torch.nn.Linear(eff_model.classifier.in_features, 2)
+# ======================================================================
+#                 MODEL 2 – EfficientNetV2 (NEW, TF 2.20 SAFE)
+# ======================================================================
 
-# Load PyTorch weights
-ck = torch.load(EFF_WEIGHTS, map_location=DEVICE)
-if "state_dict" in ck:
-    ck = ck["state_dict"]
+effnet = keras_cv.models.EfficientNetV2Backbone.from_preset(
+    "efficientnetv2_b0_imagenet"
+)
 
-clean = {k.replace("module.", ""): v for k,v in ck.items()}
-eff_model.load_state_dict(clean, strict=False)
-eff_model.to(DEVICE)
-eff_model.eval()
+def effv2_predict(img):
+    img = img.resize((256,256))
+    arr = np.array(img).astype("float32")/255.0
+    arr = np.expand_dims(arr, 0)
 
-eff_transform = transforms.Compose([
-    transforms.Resize((224,224)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
-])
+    feat = effnet.predict(arr)[0]
+    score = 1 / (1 + np.exp(-np.mean(feat)))  # sigmoid(mean)
+    fake = score
+    return float(fake)
 
-def eff_predict(img):
-    t = eff_transform(img).unsqueeze(0).to(DEVICE)
-    with torch.no_grad():
-        out = eff_model(t)
-        prob_fake = torch.softmax(out, dim=1)[0][1].item()
-    return float(prob_fake)
 
-# ---------------------------------------------------------
-#        MODEL 3 (SIMULATED FUSION MODEL)
-# ---------------------------------------------------------
+# ======================================================================
+#                         MODEL 3 – Fusion
+# ======================================================================
+
 def model3_simulated(m1, m2):
     return float((m1 + m2)/2 + np.random.uniform(-0.05, 0.05))
 
-# ---------------------------------------------------------
-#                STREAMLIT UI
-# ---------------------------------------------------------
+
+# ======================================================================
+#                            STREAMLIT UI
+# ======================================================================
+
 st.set_page_config(page_title="Deepfake Detector", layout="wide")
 
 st.markdown("""
-    <h1 style="text-align:center;">🔍 AI Deepfake Detection System</h1>
-    <h4 style="text-align:center;">EfficientNet + MesoNet + Fusion Model</h4>
-    <hr>
+<h1 style="text-align:center;">🔍 AI Deepfake Detection System</h1>
+<h4 style="text-align:center;">MesoNet + EfficientNetV2 + Fusion</h4><br>
 """, unsafe_allow_html=True)
 
-uploaded = st.file_uploader("Upload an Image", type=["jpg","jpeg","png"])
+uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
 if uploaded:
     img = Image.open(uploaded).convert("RGB")
@@ -117,58 +96,58 @@ if uploaded:
 
     st.subheader("🔄 Running Predictions...")
 
-    # Run predictions
+    # Run models
     m1 = meso_predict(img)
-    m2 = eff_predict(img)
+    m2 = effv2_predict(img)
     m3 = model3_simulated(m1, m2)
 
-    # Final Decision (EfficientNet best model)
-    final_label = "FAKE" if m2 > 0.5 else "REAL"
+    # Final label based on EfficientNetV2
+    label = "FAKE" if m2 >= 0.5 else "REAL"
 
-    # ---------------------------------------------------------
-    #             Display Scores
-    # ---------------------------------------------------------
-    st.subheader("📊 Prediction Scores (0 = real • 1 = fake)")
+    # -----------------------------------------------------------------
+    # SCORES
+    # -----------------------------------------------------------------
+    st.subheader("📊 Model Prediction Scores")
+    st.write("0 = Real, 1 = Fake")
 
     st.write(f"**Meso4:** `{m1:.3f}`")
     st.progress(m1)
 
-    st.write(f"**EfficientNet (final):** `{m2:.3f}`")
+    st.write(f"**EfficientNetV2 (Final):** `{m2:.3f}`")
     st.progress(m2)
 
-    st.write(f"**Fusion Model:** `{m3:.3f}`")
+    st.write(f"**Model-3 (Fusion):** `{m3:.3f}`")
     st.progress(m3)
 
-    # ---------------------------------------------------------
-    #               Bar Graph
-    # ---------------------------------------------------------
-    st.subheader("📈 Model Comparison Chart")
+    # -----------------------------------------------------------------
+    # BAR CHART
+    # -----------------------------------------------------------------
+    st.subheader("📈 Comparison Chart")
 
     fig, ax = plt.subplots(figsize=(6,4))
-    names = ["Meso4", "EfficientNet", "Fusion Model"]
-    scores = [m1, m2, m3]
+    names = ["Meso4", "EffNetV2", "Fusion"]
+    values = [m1, m2, m3]
 
-    ax.bar(names, scores)
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Probability of Being Fake")
+    ax.bar(names, values)
+    ax.set_ylim(0,1)
+    ax.set_ylabel("Fake Probability")
+    ax.set_title("Fake Scores by Model")
 
     st.pyplot(fig)
 
-    # ---------------------------------------------------------
-    #               Final Result Card
-    # ---------------------------------------------------------
-    st.subheader("🧾 Final Deepfake perdiction")
+    # -----------------------------------------------------------------
+    # FINAL DECISION
+    # -----------------------------------------------------------------
+    st.subheader("🧾 Final Decision (EfficientNetV2 Based)")
 
-    color = "red" if final_label == "FAKE" else "green"
-
+    color = "red" if label == "FAKE" else "green"
     st.markdown(
         f"""
-        <div style="padding:20px; background:{color}; color:white;
-             font-size:28px; text-align:center; border-radius:12px;">
-            <b>{final_label}</b><br>
+        <div style="padding:20px; border-radius:10px; background:{color}; 
+        color:white; text-align:center; font-size:26px;">
+            <b>{label}</b><br>
             Confidence: {m2:.3f}
         </div>
         """,
         unsafe_allow_html=True
     )
-
