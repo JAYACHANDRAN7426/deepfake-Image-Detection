@@ -157,7 +157,7 @@ if uploaded:
     # ---------------------------------------------------------
     #               Final Result Card
     # ---------------------------------------------------------
-    st.subheader("🧾 Final Deepfake Verdict")
+    st.subheader("🧾 Final Deepfake perdiction")
 
     color = "red" if final_label == "FAKE" else "green"
 
@@ -171,3 +171,4 @@ if uploaded:
         """,
         unsafe_allow_html=True
     )
+
