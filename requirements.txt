@@ -1,0 +1,9 @@
+streamlit
+tensorflow==2.12.0
+keras
+numpy
+opencv-python-headless
+pillow
+torch
+torchvision
+matplotlib
